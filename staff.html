@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Phonezone Stock - Staff View</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+<style>
+:root{ --blue:#2563eb; --green:#16a34a; --red:#dc2626; --orange:#f97316; --gray:#64748b; --light:#f8fafc; }
+body{ font-family:'Inter',sans-serif; background:var(--light); margin:0; padding:10px; color:#1e293b; font-size: 13px; -webkit-tap-highlight-color: transparent; }
+header{ font-size:16px; font-weight:700; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center; gap: 8px; }
+.header-title { display: flex; flex-direction: column; }
+.header-stats { font-size: 11px; color: var(--gray); font-weight: 600; margin-top: 2px; }
+#status { font-size: 9px; font-weight: 800; padding: 3px 8px; border-radius: 20px; text-transform: uppercase; flex-shrink: 0; }
+.online { background: #dcfce7; color: #16a34a; }
+.offline { background: #fee2e2; color: #ef4444; }
+
+.alert-bar { display: flex; gap: 8px; margin-bottom: 12px; }
+.alert-chip { flex: 1; padding: 10px; border-radius: 12px; display: flex; flex-direction: column; align-items: center; border: 2px solid transparent; cursor: pointer; transition: 0.2s; background: #fff;}
+.bg-red { color: var(--red); border-color: #fecaca; }
+.bg-orange { color: var(--orange); border-color: #fed7aa; }
+.alert-chip.active { border-color: #000; box-shadow: inset 0 2px 4px rgba(0,0,0,0.1); background: #f1f5f9; }
+
+.topbar { display: flex; gap: 6px; margin-bottom: 10px; height: 44px; }
+#searchField { flex: 1; height: 44px; padding: 0 12px; border-radius: 10px; border: 1px solid #cbd5e1; font-size: 14px; outline: none; }
+.btn-icon { width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; background: #fff; border: 1px solid #cbd5e1; border-radius: 10px; cursor: pointer; }
+
+mark { background: #fef08a; color: #000; padding: 0 2px; border-radius: 2px; }
+.card { background:#fff; border-radius:12px; padding:12px; margin-bottom:8px; box-shadow: 0 2px 4px rgba(0,0,0,0.03); position: relative; overflow: hidden; }
+.model-row { display:flex; justify-content:space-between; align-items:center; }
+.stock-display { display: flex; align-items: center; justify-content: center; width: 44px; height: 34px; border-radius: 8px; font-weight: 800; font-size: 16px; background: #f1f5f9; }
+
+#filterMenu { display: none; }
+.filter-label { font-size: 10px; font-weight: 700; color: var(--gray); text-transform: uppercase; margin-bottom: 6px; letter-spacing: 0.5px; }
+.brand-group { display: flex; gap: 6px; flex-wrap: wrap; max-height: 120px; overflow-y: auto; padding-bottom: 4px; }
+.brand-chip { background: #f1f5f9; border: 1px solid #cbd5e1; padding: 6px 12px; border-radius: 20px; font-size: 11px; font-weight: 600; color: #475569; cursor: pointer; }
+.brand-chip.active { background: var(--blue); color: #fff; border-color: var(--blue); }
+</style>
+</head>
+<body>
+
+<header>
+    <div class="header-title">
+        <span>📱 Phonezone Live Stock</span>
+        <div class="header-stats">Models: <span id="total-models">0</span> | Total Qty: <span id="total-stock">0</span></div>
+    </div>
+    <span id="status" class="offline">OFFLINE</span>
+</header>
+
+<div class="alert-bar">
+    <div class="alert-chip bg-red" id="chip-out" onclick="toggleFilter('out')">
+        <span style="font-size:18px; font-weight:900;" id="count-out">0</span>
+        <span style="font-size:9px; font-weight:700;">OUT OF STOCK</span>
+    </div>
+    <div class="alert-chip bg-orange" id="chip-low" onclick="toggleFilter('low')">
+        <span style="font-size:18px; font-weight:900;" id="count-low">0</span>
+        <span style="font-size:9px; font-weight:700;">LOW STOCK</span>
+    </div>
+</div>
+
+<div class="topbar">
+    <input id="searchField" placeholder="Search brands or models..." oninput="render()">
+    <button class="btn-icon" onclick="toggleSettings()">⚙️</button>
+</div>
+
+<div id="filterMenu" class="card">
+    <div class="filter-label">Filter By Brand</div>
+    <div id="brandContainer" class="brand-group"></div>
+</div>
+
+<div id="listView"></div>
+
+<script>
+  const firebaseConfig = {
+    apiKey: "AIzaSyAmKUGD5Jx7E86DwJRi42sZd3t7bdwvzXo",
+    databaseURL: "https://coverstock-3d6b0-default-rtdb.asia-southeast1.firebasedatabase.app",
+    projectId: "coverstock-3d6b0",
+  };
+
+  firebase.initializeApp(firebaseConfig);
+  const db = firebase.database();
+  const inventoryRef = db.ref('inventory_mixed');
+
+  let store = { models: [], lastSync: 0 };
+  let filterState = 'all';
+  let activeBrandFilter = 'ALL';
+
+  function highlight(text, query) {
+    if (!query) return text;
+    const parts = text.split(new RegExp(`(${query})`, 'gi'));
+    return parts.map(part => part.toLowerCase() === query.toLowerCase() ? `<mark>${part}</mark>` : part).join('');
+  }
+
+  function renderBrands(extractedBrands) {
+    const container = document.getElementById('brandContainer');
+    const sortedBrands = Array.from(extractedBrands).sort();
+    
+    let html = `<div class="brand-chip ${activeBrandFilter === 'ALL' ? 'active' : ''}" onclick="setBrandFilter('ALL')">All Brands</div>`;
+    sortedBrands.forEach(b => {
+        html += `<div class="brand-chip ${activeBrandFilter === b ? 'active' : ''}" onclick="setBrandFilter('${b}')">${b}</div>`;
+    });
+    container.innerHTML = html;
+  }
+
+  window.setBrandFilter = (brand) => {
+    activeBrandFilter = brand;
+    render();
+  };
+
+  function render() {
+    const list = document.getElementById('listView');
+    const search = document.getElementById('searchField').value.trim().toLowerCase();
+    let outCount = 0, lowCount = 0, totalStockQty = 0;
+    const currentBrands = new Set();
+    list.innerHTML = "";
+
+    store.models.forEach(m => {
+        totalStockQty += m.stock;
+        if(m.stock === 0) outCount++;
+        if(m.stock === 1) lowCount++;
+        
+        const firstWord = m.name.split(' ')[0].toUpperCase();
+        if(firstWord) currentBrands.add(firstWord);
+    });
+    
+    renderBrands(currentBrands);
+    
+    document.getElementById('total-models').innerText = store.models.length;
+    document.getElementById('total-stock').innerText = totalStockQty;
+    document.getElementById('count-out').innerText = outCount;
+    document.getElementById('count-low').innerText = lowCount;
+
+    const scoredList = store.models.map(m => {
+        let score = -1;
+        const nameLower = m.name.toLowerCase();
+        
+        if (!search) {
+            score = 0;
+        } else {
+            if (nameLower === search) score = 100;
+            else if (nameLower.startsWith(search)) score = 80;
+            else if (nameLower.includes(" " + search)) score = 60;
+            else {
+                const searchWords = search.split(/\s+/);
+                let matchesAllWords = true, subScore = 0;
+                searchWords.forEach(word => {
+                    if (nameLower.includes(word)) subScore += 10;
+                    else matchesAllWords = false;
+                });
+                if (matchesAllWords) subScore += 20;
+                if (subScore > 0) score = subScore;
+            }
+        }
+        return { model: m, score: score };
+    });
+
+    const filtered = scoredList.filter(item => {
+        if (item.score === -1) return false;
+        if (filterState === 'out' && item.model.stock !== 0) return false;
+        if (filterState === 'low' && item.model.stock !== 1) return false;
+        if (activeBrandFilter !== 'ALL') {
+            const itemBrand = item.model.name.split(' ')[0].toUpperCase();
+            if (itemBrand !== activeBrandFilter) return false;
+        }
+        return true;
+    }).sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score;
+        return a.model.name.localeCompare(b.model.name);
+    });
+
+    filtered.forEach(item => {
+        const m = item.model;
+        const card = document.createElement('div');
+        card.className = "card model-row";
+        
+        let colorStyle = '#000';
+        if (m.stock === 0) colorStyle = 'var(--red)';
+        else if (m.stock === 1) colorStyle = 'var(--orange)';
+
+        card.innerHTML = `
+            <div style="font-weight:600; flex:1; font-size:14px;">${highlight(m.name, search)}</div>
+            <div class="stock-display" style="color:${colorStyle}">
+                ${m.stock}
+            </div>`;
+        list.appendChild(card);
+    });
+  }
+
+  window.toggleFilter = (type) => {
+    filterState = (filterState === type) ? 'all' : type;
+    document.getElementById('chip-out').classList.toggle('active', filterState === 'out');
+    document.getElementById('chip-low').classList.toggle('active', filterState === 'low');
+    render();
+  };
+
+  window.toggleSettings = () => {
+    const p = document.getElementById('filterMenu');
+    p.style.display = (p.style.display === 'block') ? 'none' : 'block';
+  };
+
+  db.ref('.info/connected').on('value', snap => {
+    const s = document.getElementById('status');
+    s.innerText = snap.val() ? "ONLINE" : "OFFLINE";
+    s.className = snap.val() ? "online" : "offline";
+  });
+
+  inventoryRef.on('value', snap => {
+    const cloud = snap.val();
+    if(cloud) {
+        store = cloud;
+        localStorage.setItem('phonezone_mixed', JSON.stringify(store));
+        render();
+    }
+  });
+
+  // Load from local cache immediately on startup
+  const cached = localStorage.getItem('phonezone_mixed');
+  if(cached) {
+      store = JSON.parse(cached);
+      render();
+  }
+</script>
+</body>
+</html>
