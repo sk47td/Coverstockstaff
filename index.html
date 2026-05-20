@@ -225,5 +225,15 @@ mark { background: #fef08a; color: #000; padding: 0 2px; border-radius: 2px; }
       render();
   }
 </script>
+    <script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('./sw.js')
+        .then(reg => console.log('Service Worker Registered'))
+        .catch(err => console.log('Registration Failed', err));
+    });
+  }
+</script>
+
 </body>
 </html>
