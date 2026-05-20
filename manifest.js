@@ -1,10 +1,11 @@
 {
-  "short_name": "PZ Stock",
+  "short_name": "Phonezone",
   "name": "Phonezone Stock Manager",
   "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#f8fafc",
   "theme_color": "#2563eb",
+  "orientation": "portrait",
   "icons": [
     {
       "src": "app-icon.png",
